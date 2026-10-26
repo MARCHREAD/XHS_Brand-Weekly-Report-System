@@ -1,12 +1,12 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from collector.weekly.analysis import build_report, corpus, ensure_annotation_queue, train_sentiment
-from collector.weekly.collection import Collector
+from collector.weekly.collection import Collector, run_with_backoff
 from collector.weekly.manager import Manager, default_config
 from collector.weekly.routes import router
 from collector.weekly.store import Store
@@ -61,6 +61,33 @@ def test_stalled_cursor_never_becomes_complete(tmp_path):
     assert s.meta()["status"] == "partial"
     assert s.get("note", "n1")["comments"]["stop_reason"] == "cursor_stalled"
     assert s.get("note", "n1")["complete"] is False
+
+
+def test_deferred_note_runs_last_and_resumes_saved_reply_cursor(tmp_path):
+    s = store_fixture(tmp_path)
+    for word in ['libtv', '即梦', 'updream']:
+        s.put('search',word,{'keyword':word,'nonempty_pages':100,'stop_reason':'target_reached'})
+    s.put('note','z-delayed',{'search':{'note_id':'z-delayed','xsec_token':'offline'},'brands':['libtv'],'detail_done':True,'complete':False,'deferred':True,'comments':{'cursor':'main-end','seen':[''],'pages':79,'complete':True}})
+    s.put('note','a-next',{'search':{'note_id':'a-next','xsec_token':'offline'},'brands':['libtv'],'detail_done':False,'complete':False})
+    s.put('root','z-delayed:r',{'note_id':'z-delayed','root_id':'r','cursor':'saved-reply-cursor','seen':['earlier'],'complete':False})
+    s.put('comment','existing',{'note_id':'z-delayed','comment':{'comment_id':'existing','content':'already saved'}})
+    assert s.summary()['notes_deferred']==1
+    assert s.summary()['notes_incomplete']==2
+    calls=[]
+    class Adapter(FixtureAdapter):
+        async def comments(self,note,cursor):
+            calls.append(('main',note['note_id'],cursor))
+            return {'comments':[],'has_more':False,'cursor':''}
+        async def replies(self,note,root_id,cursor):
+            calls.append(('reply',note['note_id'],cursor))
+            return {'comments':[],'has_more':False,'cursor':''}
+    asyncio.run(Collector(s,Adapter()).run())
+    assert calls==[('main','a-next',''),('reply','z-delayed','saved-reply-cursor')]
+    assert s.get('comment','existing')['comment']['content']=='already saved'
+    assert s.get('note','z-delayed')['comments']['pages']==79
+    assert s.get('note','z-delayed')['complete'] is True
+    assert s.summary()['notes_deferred']==0
+    assert s.summary()['status']=='completed'
 
 
 def test_search_reaches_100_nonempty_pages_across_sorts_without_50_note_cap(tmp_path):
@@ -121,3 +148,46 @@ def test_weekly_api_validates_100_pages_without_live_egress(tmp_path, monkeypatc
     assert r.status_code == 202
     assert r.json()["config"]["primary"] == "libtv"
     assert c.get('/v1/xhs/weekly/jobs/invalid/report').status_code == 404
+
+
+def test_stale_worker_handle_does_not_mark_new_worker_interrupted(tmp_path):
+    manager=Manager(tmp_path)
+    job_id='b'*32
+    s=Store(manager.root/job_id)
+    s.meta(job_id=job_id,status='running',pid=200,created_at='2026-10-26')
+    class ExitedProcess:
+        pid=100
+        returncode=0
+        def poll(self): return 0
+    manager.processes[(job_id,'collect')]=ExitedProcess()
+    assert manager.latest()[0]['status']=='running'
+    s.meta(pid=100)
+    assert manager.latest()[0]['status']=='interrupted'
+
+
+def test_frequency_limit_waits_before_retry_without_live_requests(tmp_path, monkeypatch):
+    from collector.weekly import collection
+    s=store_fixture(tmp_path)
+    instant=[datetime(2026,10,26,tzinfo=timezone.utc)]
+    calls=[]
+    class FakeCollector:
+        def __init__(self,store,adapter):self.store=store
+        async def run(self):
+            calls.append(instant[0])
+            self.store.meta(status='rate_limited' if len(calls)==1 else 'completed')
+    async def advance(seconds): instant[0]+=timedelta(seconds=seconds)
+    monkeypatch.setattr(collection,'Collector',FakeCollector)
+    asyncio.run(run_with_backoff(s,object(),cooldown_seconds=30,tick_seconds=5,clock=lambda:instant[0],sleep=advance))
+    assert len(calls)==2
+    assert (calls[1]-calls[0]).total_seconds()==30
+    assert s.meta()['status']=='completed'
+
+
+def test_cooldown_can_be_paused_without_starting_collection(tmp_path):
+    s=store_fixture(tmp_path)
+    start=datetime(2026,10,26,tzinfo=timezone.utc)
+    s.meta(cooldown_until=(start+timedelta(minutes=30)).isoformat())
+    async def pause(seconds):s.meta(status='pause_requested')
+    asyncio.run(run_with_backoff(s,object(),clock=lambda:start,sleep=pause))
+    assert s.meta()['status']=='paused'
+    assert s.meta()['cooldown_until'] is not None

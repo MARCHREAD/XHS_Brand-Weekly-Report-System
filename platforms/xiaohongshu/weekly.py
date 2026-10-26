@@ -7,7 +7,7 @@ from dataclasses import replace
 import json
 
 from collector.config import Settings
-from collector.weekly.collection import Adapter, Collector
+from collector.weekly.collection import Adapter, run_with_backoff
 from collector.weekly.manager import Manager, default_config
 
 
@@ -31,7 +31,7 @@ def main():
             store.meta(status="login_required", error="Open the workbench Cookie login")
             return
         service = CollectorService(settings)
-        asyncio.run(Collector(store, Adapter(service)).run())
+        asyncio.run(run_with_backoff(store, Adapter(service)))
         print(json.dumps(store.summary(), ensure_ascii=False))
         if store.meta().get("status") in {"completed", "partial"} and store.meta().get("analysis_status") != "running":
             manager.launch(args.job, "analyze")

@@ -82,12 +82,12 @@
     const status=names[job.status]||job.status;
     $('#health-text').textContent=status;
     $('#health-dot').style.background=job.status==='running'?'#5ad39a':job.status==='completed'?'#5ad39a':'#f1ba60';
-    $('#collection-description').textContent=`${state.snapshot?'实时采集进度 · ':''}${status} · ${format(job.notes_complete)}/${format(job.notes)} 篇采完详情及评论 · 最后更新 ${localTime(job.updated_at)}`;
+    $('#collection-description').textContent=`${state.snapshot?'实时采集进度 · ':''}${status} · ${format(job.notes_complete)}/${format(job.notes)} 篇采完详情及评论${job.notes_deferred?' · 延后 '+format(job.notes_deferred)+' 篇':''}${job.cooldown_until?' · 预计 '+localTime(job.cooldown_until)+' 后自动续采':''} · 最后更新 ${localTime(job.updated_at)}`;
     $('#collection-metrics').innerHTML=[[job.notes,'搜索去重笔记'],[job.comments,'已保存主评论与回复'],[job.notes_complete,'详情与评论均采完'],[job.notes_incomplete,'待采或尚未采全']].map(([v,l])=>`<div><b>${format(v)}</b><span>${l}</span></div>`).join('');
     const sortNames={general:'综合排序',time_descending:'最新发布',popularity_descending:'最多点赞'};
     const stops={upstream_end:'平台返回结束',target_reached:'当前排序目标已达',repeated_page:'重复页，保留断点',empty_nonterminal:'异常空页，待确认'};
     $('#collection-table').innerHTML=job.searches.map(s=>`<tr><td>${esc(s.keyword)}</td><td>${esc(sortNames[s.sort]||s.sort)}</td><td class="numeric">${format(s.nonempty_pages??0)}</td><td class="numeric">${format(s.fetched_pages)}</td><td>${esc(stops[s.stop_reason]||s.status)}</td></tr>`).join('');
-    $('#pause').disabled=!['running','cooldown','rate_limited'].includes(job.status);
+    $('#pause').disabled=!['running','cooldown'].includes(job.status);
     $('#resume').disabled=['running','pause_requested','cooldown'].includes(job.status);
     const training=job.analysis_status==='running';
     $('#run-topics').disabled=training;$('#train-svm').disabled=training;

@@ -68,7 +68,8 @@ class Store:
         with self.connect() as db:
             completed = db.execute("SELECT COUNT(*) FROM records WHERE kind='note' AND json_extract(data,'$.complete')=1").fetchone()[0]
             pending = db.execute("SELECT COUNT(*) FROM records WHERE kind='note' AND COALESCE(json_extract(data,'$.complete'),0)=0").fetchone()[0]
-        return {**meta, "searches": searches, "notes": self.count("note"), "comments": self.count("comment"), "notes_complete": completed, "notes_incomplete": pending}
+            deferred = db.execute("SELECT COUNT(*) FROM records WHERE kind='note' AND COALESCE(json_extract(data,'$.complete'),0)=0 AND json_extract(data,'$.deferred')=1").fetchone()[0]
+        return {**meta, "searches": searches, "notes": self.count("note"), "comments": self.count("comment"), "notes_complete": completed, "notes_incomplete": pending, "notes_deferred": deferred}
 
 
 def atomic_json(path: Path, value):

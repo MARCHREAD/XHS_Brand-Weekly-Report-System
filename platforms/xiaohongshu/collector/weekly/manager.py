@@ -34,14 +34,16 @@ class Manager:
         for entry in entries:
             for action, field, failure in [("collect", "status", "interrupted"), ("analyze", "analysis_status", "failed"), ("train", "analysis_status", "failed")]:
                 process = self.processes.get((entry.get("job_id"), action))
-                if process is not None and process.poll() is not None and entry.get(field) == "running":
+                pid_field = "pid" if action == "collect" else "analysis_pid"
+                active_states = {"running", "cooldown", "pause_requested"} if action == "collect" else {"running"}
+                if process is not None and process.pid == entry.get(pid_field) and process.poll() is not None and entry.get(field) in active_states:
                     store = self.store(entry["job_id"])
                     store.meta(**{field: failure, "process_exit_code": process.returncode})
                     entry.update(store.summary())
         return sorted(entries, key=lambda r: r.get("created_at", ""), reverse=True)
 
     def create(self, config):
-        if any(x.get("status") == "running" for x in self.latest()):
+        if any(x.get("status") in {"running", "cooldown", "pause_requested"} for x in self.latest()):
             raise ValueError("A collection is already running; inspect or pause it first")
         job_id = uuid4().hex
         store = Store(self.root / job_id)
@@ -51,7 +53,7 @@ class Manager:
 
     def launch(self, job_id, action):
         store = self.store(job_id)
-        if store.meta().get("status") == "running" and action == "collect":
+        if store.meta().get("status") in {"running", "cooldown", "pause_requested"} and action == "collect":
             raise ValueError("This report is already running")
         log = (store.directory / f"{action}.log").open("a", encoding="utf-8")
         env = os.environ.copy()

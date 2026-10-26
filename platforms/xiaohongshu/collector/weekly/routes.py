@@ -70,7 +70,7 @@ def router(manager: Manager, get_service, require_local):
     def pause(job_id: str, request: Request):
         require_local(request)
         s = store(job_id)
-        if s.meta().get("status") == "running":
+        if s.meta().get("status") in {"running", "cooldown"}:
             s.meta(status="pause_requested")
         return s.summary()
 

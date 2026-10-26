@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ..errors import XhsUpstreamError
@@ -11,6 +12,33 @@ from .store import Store, now
 
 class Paused(RuntimeError):
     pass
+
+
+async def run_with_backoff(store, adapter, *, cooldown_seconds=1800, tick_seconds=15, clock=None, sleep=asyncio.sleep):
+    """Respect platform frequency limits while retaining the same resumable task."""
+    clock = clock or (lambda: datetime.now(timezone.utc))
+    while True:
+        until = store.meta().get("cooldown_until")
+        if until:
+            deadline = datetime.fromisoformat(until)
+            if clock() < deadline:
+                store.meta(status="cooldown", stage="cooldown")
+            while clock() < deadline:
+                if store.meta().get("status") == "pause_requested":
+                    store.meta(status="paused", stage="paused")
+                    return
+                await sleep(min(tick_seconds, (deadline - clock()).total_seconds()))
+            store.meta(cooldown_until=None)
+        if store.meta().get("status") == "pause_requested":
+            store.meta(status="paused", stage="paused")
+            return
+        await Collector(store, adapter).run()
+        if store.meta().get("status") != "rate_limited":
+            return
+        attempts = int(store.meta().get("rate_limit_events", 0)) + 1
+        delay = min(cooldown_seconds * (2 ** min(attempts - 1, 2)), 7200)
+        store.meta(status="cooldown", stage="cooldown", rate_limit_events=attempts,
+                   cooldown_until=(clock() + timedelta(seconds=delay)).isoformat())
 
 
 def error_kind(exc):
@@ -97,7 +125,7 @@ class Collector:
                         break
                     await self.search(keyword, config, sort, config["search_pages"] - fetched)
             self.store.meta(stage="details_comments")
-            pending_notes = sorted(self.store.items("note"), key=lambda row: (config["primary"] in row[1]["brands"], row[0]), reverse=True)
+            pending_notes = sorted(self.store.items("note"), key=lambda row: (not row[1].get("deferred", False), config["primary"] in row[1]["brands"], row[0]), reverse=True)
             for note_id, record in pending_notes:
                 if record.get("complete"):
                     continue
@@ -221,6 +249,8 @@ class Collector:
                 root["cursor"] = page["cursor"]
                 self.store.put("root", key, root)
         record["complete"] = bool(record.get("detail_done") and state["complete"] and all(r["complete"] for _, r in roots))
+        if record["complete"]:
+            record.pop("deferred", None)
         record["comments"] = state
         record["captured_at"] = now()
         self.store.put("note", note_id, record)
