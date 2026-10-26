@@ -36,6 +36,9 @@ async def run_with_backoff(store, adapter, *, cooldown_seconds=1800, tick_second
         if store.meta().get("status") != "rate_limited":
             return
         attempts = int(store.meta().get("rate_limit_events", 0)) + 1
+        if store.meta()["config"].get("rate_limit_policy") == "pause":
+            store.meta(rate_limit_events=attempts, cooldown_until=None)
+            return
         delay = min(cooldown_seconds * (2 ** min(attempts - 1, 2)), 7200)
         store.meta(status="cooldown", stage="cooldown", rate_limit_events=attempts,
                    cooldown_until=(clock() + timedelta(seconds=delay)).isoformat())
@@ -97,6 +100,24 @@ class Collector:
     def __init__(self, store: Store, adapter: Any):
         self.store, self.adapter = store, adapter
 
+    def finish_sample(self, record):
+        """Keep upstream exhaustion separate from fulfilling the requested sample."""
+        limit = self.store.meta()["config"].get("comment_page_limit")
+        state = record.get("comments") or {"cursor": "", "seen": [], "pages": 0, "complete": False}
+        if limit is None:
+            return False
+        reached = state.get("complete", False) or state.get("pages", 0) >= limit
+        if reached and not state.get("complete", False):
+            state["stop_reason"] = "page_limit"
+        record.update(comments=state, sampling_complete=bool(reached),
+                      comment_page_limit=limit, comment_scope="main_pages_with_inline_replies")
+        record["full_comments_complete"] = bool(state.get("complete") and all(r["complete"] for _, r in self.store.items("root") if r["note_id"] == record["search"]["note_id"]))
+        record["complete"] = bool(record.get("detail_done") and reached)
+        if record["complete"]:
+            record.pop("deferred", None)
+            record.pop("error", None)
+        return True
+
     async def request(self, call):
         if self.store.meta().get("status") == "pause_requested":
             raise Paused("paused")
@@ -125,6 +146,10 @@ class Collector:
                         break
                     await self.search(keyword, config, sort, config["search_pages"] - fetched)
             self.store.meta(stage="details_comments")
+            # Apply a reduced sampling target to existing checkpoints without new requests.
+            for note_id, record in self.store.items("note"):
+                if self.finish_sample(record):
+                    self.store.put("note", note_id, record)
             pending_notes = sorted(self.store.items("note"), key=lambda row: (not row[1].get("deferred", False), config["primary"] in row[1]["brands"], row[0]), reverse=True)
             for note_id, record in pending_notes:
                 if record.get("complete"):
@@ -207,6 +232,10 @@ class Collector:
         self.store.put_many(records)
 
     async def hydrate(self, note_id, record):
+        if self.finish_sample(record) and record["complete"]:
+            self.store.put("note", note_id, record)
+            return
+        limit = self.store.meta()["config"].get("comment_page_limit")
         note = record["search"]
         if not note.get("xsec_token"):
             record["error"] = "missing_observed_token"
@@ -217,9 +246,12 @@ class Collector:
             record.update(detail=detail, detail_done=bool(detail.get("found", True)), captured_at=now(), error=None)
             self.store.put("note", note_id, record)
         state = record.get("comments", {"cursor": "", "seen": [], "pages": 0, "complete": False})
-        if state.get("stop_reason") == "cursor_stalled":
+        if state.get("stop_reason") in {"cursor_stalled", "page_limit"}:
             state.pop("stop_reason")
         while not state["complete"] and not state.get("stop_reason"):
+            if limit is not None and state["pages"] >= limit:
+                state["stop_reason"] = "page_limit"
+                break
             cursor = state["cursor"]
             page = await self.request(lambda: self.adapter.comments(note, cursor))
             # Persist each page before advancing its cursor. Replaying after a crash is idempotent.
@@ -233,6 +265,12 @@ class Collector:
             state["cursor"] = page["cursor"]
             record["comments"] = state
             self.store.put("note", note_id, record)
+        if limit is not None:
+            record["comments"] = state
+            self.finish_sample(record)
+            record["captured_at"] = now()
+            self.store.put("note", note_id, record)
+            return
         roots = [(key, r) for key, r in self.store.items("root") if r["note_id"] == note_id]
         for key, root in roots:
             if root.get("stop_reason") == "cursor_stalled":

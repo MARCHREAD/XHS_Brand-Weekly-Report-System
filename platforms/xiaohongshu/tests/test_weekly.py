@@ -38,7 +38,7 @@ class FixtureAdapter:
 
 def store_fixture(tmp_path):
     s = Store(tmp_path)
-    s.meta(job_id="a" * 32, config=default_config(), status="created")
+    s.meta(job_id="a" * 32, config={**default_config(), "comment_page_limit": None, "comment_policy": "all_available_main_and_replies", "rate_limit_policy": "backoff"}, status="created")
     return s
 
 
@@ -147,6 +147,9 @@ def test_weekly_api_validates_100_pages_without_live_egress(tmp_path, monkeypatc
     r = c.post('/v1/xhs/weekly/jobs', json={"search_pages": 100})
     assert r.status_code == 202
     assert r.json()["config"]["primary"] == "libtv"
+    assert r.json()["config"]["comment_page_limit"] == 2
+    assert c.post('/v1/xhs/weekly/jobs', json={"comment_page_limit": 0}).status_code == 422
+    assert c.post('/v1/xhs/weekly/jobs', json={"comment_page_limit": None}).json()["config"]["comment_policy"] == 'all_available_main_and_replies'
     assert c.get('/v1/xhs/weekly/jobs/invalid/report').status_code == 404
 
 
@@ -191,3 +194,70 @@ def test_cooldown_can_be_paused_without_starting_collection(tmp_path):
     asyncio.run(run_with_backoff(s,object(),clock=lambda:start,sleep=pause))
     assert s.meta()['status']=='paused'
     assert s.meta()['cooldown_until'] is not None
+
+
+@pytest.mark.parametrize('ends_early', [False, True])
+def test_two_page_sampling_keeps_inline_replies_without_expanding_threads(tmp_path, ends_early):
+    s = store_fixture(tmp_path)
+    s.meta(config={**s.meta()['config'], 'comment_page_limit': 2})
+    calls = []
+    class Adapter(FixtureAdapter):
+        async def comments(self, note, cursor):
+            calls.append(cursor)
+            return {'comments': [{'comment_id': 'c'+str(len(calls)), 'sub_comment_has_more': True,
+                                  'sub_comments': [{'comment_id': 'r'+str(len(calls))}]}],
+                    'has_more': not ends_early, 'cursor': str(len(calls))}
+        async def replies(self, *args):
+            raise AssertionError('Sampling must not expand reply threads')
+    a = Adapter()
+    asyncio.run(Collector(s, a).run())
+    r = s.get('note', 'n1')
+    assert len(calls) == (1 if ends_early else 2)
+    assert s.count('comment') == 2 * len(calls)
+    assert r['complete'] and r['sampling_complete']
+    assert not r['full_comments_complete']
+    assert r['comments']['complete'] is ends_early
+    assert r['comments']['stop_reason'] == ('upstream_end' if ends_early else 'page_limit')
+    asyncio.run(Collector(s, a).run())
+    assert len(calls) == (1 if ends_early else 2)
+
+
+@pytest.mark.parametrize('pages, ended', [(2, False), (79, True)])
+def test_existing_large_checkpoint_satisfies_reduced_target_without_requests(tmp_path, pages, ended):
+    s = store_fixture(tmp_path)
+    s.meta(config={**s.meta()['config'], 'comment_page_limit': 2})
+    for word in ['libtv', '即梦', 'updream']:
+        s.put('search', word, {'keyword': word, 'nonempty_pages': 100, 'stop_reason': 'target_reached'})
+    record = {'search': {'note_id': 'large'}, 'brands': ['libtv'], 'detail_done': True,
+              'complete': False, 'deferred': True,
+              'comments': {'cursor': 'saved', 'seen': [''], 'pages': pages, 'complete': ended}}
+    s.put('note', 'large', record)
+    s.put('root', 'large:r', {'note_id': 'large', 'complete': False, 'cursor': 'reply-saved'})
+    s.put('comment', 'old', {'note_id': 'large', 'comment': {'content': 'preserved'}})
+    asyncio.run(Collector(s, object()).run())
+    assert s.meta()['status'] == 'completed'
+    r = s.get('note', 'large')
+    assert r['comments'] == {**record['comments'], **({} if ended else {'stop_reason': 'page_limit'})}
+    assert r['complete'] and not r['full_comments_complete']
+    assert not r.get('deferred')
+    assert s.get('comment', 'old')['comment']['content'] == 'preserved'
+    assert s.get('root', 'large:r')['cursor'] == 'reply-saved'
+
+
+def test_rate_limit_pause_policy_exits_without_automatic_retry(tmp_path, monkeypatch):
+    from collector.weekly import collection
+    s = store_fixture(tmp_path)
+    s.meta(config={**s.meta()['config'], 'rate_limit_policy': 'pause'})
+    calls = []
+    class FakeCollector:
+        def __init__(self, store, adapter): self.store = store
+        async def run(self):
+            calls.append(True)
+            self.store.meta(status='rate_limited')
+    async def no_wait(seconds): raise AssertionError('Manual policy must not wait or retry')
+    monkeypatch.setattr(collection, 'Collector', FakeCollector)
+    asyncio.run(run_with_backoff(s, object(), sleep=no_wait))
+    assert calls == [True]
+    assert s.meta()['status'] == 'rate_limited'
+    assert s.meta()['cooldown_until'] is None
+    assert s.meta()['rate_limit_events'] == 1

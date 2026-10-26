@@ -7,7 +7,7 @@
   const percent = value => value == null ? '—' : `${(value * 100).toFixed(1)}%`;
   const localTime = value => value ? new Date(value).toLocaleString('zh-CN', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}) : '—';
   const colors = {positive:'#299467',neutral:'#a4b2c4',negative:'#cf5569',pending:'#cf9a39'};
-  const names = {positive:'正向',neutral:'中性',negative:'负向',pending:'待复核',running:'采集中',completed:'采集完成',partial:'部分完成',paused:'已暂停',pause_requested:'正在暂停',verification_required:'平台验证待处理',login_required:'需要登录',rate_limited:'平台限流，等待冷却',cooldown:'冷却等待中',failed:'任务异常',interrupted:'任务已中断'};
+  const names = {positive:'正向',neutral:'中性',negative:'负向',pending:'待复核',running:'采集中',completed:'采集完成',partial:'部分完成',paused:'已暂停',pause_requested:'正在暂停',verification_required:'平台验证待处理',login_required:'需要登录',rate_limited:'平台限流，已暂停',cooldown:'冷却等待中',failed:'任务异常',interrupted:'任务已中断'};
   const stages = {preparing:'准备数据',svm_grouped_cv:'SVM 分组交叉验证',embeddings:'更新文本语义向量',bertopic_fit:'BERTopic 话题训练',bertopic:'话题聚类',bertopic_save_reload:'模型保存与加载校验',finished:'已完成'};
   const state = {job:null,report:null,view:null,scope:'week',brand:'libtv',week:'2026-10-19',snapshot:null,busy:false,archiveStamp:null};
   let toastTimer;
@@ -82,8 +82,9 @@
     const status=names[job.status]||job.status;
     $('#health-text').textContent=status;
     $('#health-dot').style.background=job.status==='running'?'#5ad39a':job.status==='completed'?'#5ad39a':'#f1ba60';
-    $('#collection-description').textContent=`${state.snapshot?'实时采集进度 · ':''}${status} · ${format(job.notes_complete)}/${format(job.notes)} 篇采完详情及评论${job.notes_deferred?' · 延后 '+format(job.notes_deferred)+' 篇':''}${job.cooldown_until?' · 预计 '+localTime(job.cooldown_until)+' 后自动续采':''} · 最后更新 ${localTime(job.updated_at)}`;
-    $('#collection-metrics').innerHTML=[[job.notes,'搜索去重笔记'],[job.comments,'已保存主评论与回复'],[job.notes_complete,'详情与评论均采完'],[job.notes_incomplete,'待采或尚未采全']].map(([v,l])=>`<div><b>${format(v)}</b><span>${l}</span></div>`).join('');
+    const commentScope=job.config?.comment_page_limit != null ? `前 ${job.config.comment_page_limit} 页主评论及随页回复（保留此前数据）` : '全部可获取主评论与回复';
+    $('#collection-description').textContent=`${state.snapshot?'实时采集进度 · ':''}${status} · ${format(job.notes_complete)}/${format(job.notes)} 篇完成当前采集目标 · ${commentScope}${job.notes_deferred?' · 延后 '+format(job.notes_deferred)+' 篇':''}${job.cooldown_until?' · 预计 '+localTime(job.cooldown_until)+' 后自动续采':''} · 最后更新 ${localTime(job.updated_at)}`;
+    $('#collection-metrics').innerHTML=[[job.notes,'搜索去重笔记'],[job.comments,'已保存主评论与回复'],[job.notes_complete,'详情与评论采样已完成'],[job.notes_incomplete,'待完成当前采集目标']].map(([v,l])=>`<div><b>${format(v)}</b><span>${l}</span></div>`).join('');
     const sortNames={general:'综合排序',time_descending:'最新发布',popularity_descending:'最多点赞'};
     const stops={upstream_end:'平台返回结束',target_reached:'当前排序目标已达',repeated_page:'重复页，保留断点',empty_nonterminal:'异常空页，待确认'};
     $('#collection-table').innerHTML=job.searches.map(s=>`<tr><td>${esc(s.keyword)}</td><td>${esc(sortNames[s.sort]||s.sort)}</td><td class="numeric">${format(s.nonempty_pages??0)}</td><td class="numeric">${format(s.fetched_pages)}</td><td>${esc(stops[s.stop_reason]||s.status)}</td></tr>`).join('');
@@ -132,7 +133,8 @@
     $('#week-end').textContent='— '+view.period[1].slice(5).replace('-','.');
     $('#report-stamp').textContent=`${view.brand} · ${view.scope==='history'?'跨期采样':view.period.join(' — ')} · 数据来源 小红书公开内容`;
     const warnings=[];
-    if(!['completed','partial'].includes(job.status))warnings.push(`采集${names[job.status]||job.status}，${format(job.notes_complete)}/${format(job.notes)} 篇已采完；当前统计仍受覆盖范围影响。`);
+    if(job.config?.comment_page_limit != null)warnings.push(`评论按每篇前 ${job.config.comment_page_limit} 页主评论与随页回复抽样，保留调整前已采数据；情绪占比仅代表已采样本。`);
+    if(!['completed','partial'].includes(job.status))warnings.push(`采集${names[job.status]||job.status}，${format(job.notes_complete)}/${format(job.notes)} 篇完成当前采集目标；当前统计仍受覆盖范围影响。`);
     if(['verification_required','rate_limited','cooldown'].includes(job.status))warnings.push('平台限制会保留断点，页面指标不会用演示值补齐。');
     if(report.stale)warnings.push('新样本已保存，图表包含最新可用笔记；话题与情绪仍以最近一次模型结果为准。');
     const evaluation=report.models.sentiment.metrics?.classification_report?.negative;

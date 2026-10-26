@@ -8,6 +8,8 @@
   "week_start": "2026-10-19",
   "week_end": "2026-10-25",
   "timezone": "Asia/Shanghai",
-  "comment_policy": "all_available_main_and_replies",
+  "comment_policy": "main_pages_with_inline_replies",
+  "comment_page_limit": 2,
+  "rate_limit_policy": "pause",
   "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 }

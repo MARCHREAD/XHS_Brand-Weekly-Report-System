@@ -87,7 +87,7 @@ def project(report, notes, docs, lookup, topic_info, predictions, *, scope="week
     if competitors:
         leader = max(competitors, key=lambda row: row["volume"])
         insights.append({"title": f"样本声量领先：{leader['brand']}", "text": f"已取得详情的样本中识别 {leader['volume']} 篇相关笔记。采集覆盖尚不一致时，不解释为全平台市场份额。", "target": "competitors"})
-    insights.append({"title": "先检查数据覆盖", "text": f"共发现 {report['collection']['notes']} 篇笔记，{report['collection']['notes_complete']} 篇已采完详情及评论；缺失日期和未采完内容不会补成演示数据。", "target": "collection"})
+    insights.append({"title": "先检查数据覆盖", "text": f"共发现 {report['collection']['notes']} 篇笔记，{report['collection']['notes_complete']} 篇已完成当前详情与评论采集目标；缺失日期和未采完内容不会补成演示数据。", "target": "collection"})
     pending = sentiment["pending"]
     actions = [{"id": "review-negative", "title": f"复核 {sentiment['negative']} 条负向候选", "owner": "品牌运营", "priority": "高", "target": "sentiment"},
         {"id": "review-pending", "title": f"补标 {pending} 条待判定评论", "owner": "数据分析", "priority": "中", "target": "models"},

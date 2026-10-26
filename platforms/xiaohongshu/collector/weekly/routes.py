@@ -17,6 +17,7 @@ class ReportRequest(BaseModel):
     primary: str = Field(default="libtv", min_length=1, max_length=80)
     competitors: list[str] = Field(default_factory=lambda: ["即梦", "updream"], min_length=1, max_length=5)
     search_pages: int = Field(default=100, ge=100, le=500)
+    comment_page_limit: int | None = Field(default=2, ge=1, le=500)
     sort: Literal["general", "popularity_descending", "time_descending"] = "time_descending"
     week_start: date = date(2026, 10, 19)
     week_end: date = date(2026, 10, 25)
@@ -57,6 +58,7 @@ def router(manager: Manager, get_service, require_local):
     async def create(body: ReportRequest, request: Request, service=Depends(get_service)):
         require_local(request)
         config = {**default_config(), **body.model_dump(mode="json")}
+        config["comment_policy"] = "all_available_main_and_replies" if body.comment_page_limit is None else "main_pages_with_inline_replies"
         try:
             return manager.create(config)
         except ValueError as exc:

@@ -2,7 +2,7 @@
   const $ = s => document.querySelector(s);
   const api = '/v1/xhs/weekly';
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const name = {positive:'正向',neutral:'中性',negative:'负向',running:'运行中',paused:'已暂停',partial:'部分完成',completed:'采集完成',login_required:'需要登录',verification_required:'需要平台验证',failed:'任务失败',pause_requested:'正在暂停'};
+  const name = {positive:'正向',neutral:'中性',negative:'负向',running:'运行中',paused:'已暂停',partial:'部分完成',completed:'采集完成',rate_limited:'平台限流，已暂停',cooldown:'冷却等待中',login_required:'需要登录',verification_required:'需要平台验证',failed:'任务失败',pause_requested:'正在暂停'};
   let job = null, report = null, offset = 0, busy = false;
   function message(s, error=false) { $('#message').textContent=s; $('#message').className=s?`notice ${error?'error':''}`:''; }
   async function call(path, method='GET', body) {
@@ -20,7 +20,7 @@
       if(!jobs.length){$('#job-meta').textContent='尚无采集任务，填写配置后启动。';return;}
       job=jobs[0];
       $('#job-meta').textContent=`${name[job.status]||job.status} · ${job.stage} · 更新于 ${new Date(job.updated_at).toLocaleString('zh-CN')}`;
-      $('#progress').innerHTML=metric(job.notes,'去重笔记')+metric(job.comments,'已保存评论（含回复）')+metric(job.notes_complete,'详情与评论均采完')+metric(job.notes_incomplete,'待采或尚未采全');
+      $('#progress').innerHTML=metric(job.notes,'去重笔记')+metric(job.comments,'已保存评论（含回复）')+metric(job.notes_complete,'详情与评论采样已完成')+metric(job.notes_incomplete,'待完成当前采集目标');
       $('#search-progress').innerHTML=job.searches.map(s=>`<tr><td>${esc(s.keyword)}</td><td>${esc(s.sort||'time_descending')}</td><td>${esc(s.nonempty_pages??0)}</td><td>${esc(s.fetched_pages)} / ${esc(s.requested_pages)}</td><td>${esc(s.stop_reason||s.status)}</td></tr>`).join('');
       $('#model-status').textContent=`分析状态：${job.analysis_status||'未运行'} ${job.analysis_stage||''} ${job.analysis_error||''}`;
       $('#pause').disabled=job.status!=='running';$('#resume').disabled=['running','pause_requested'].includes(job.status);
