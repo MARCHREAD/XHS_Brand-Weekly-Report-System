@@ -1,0 +1,10 @@
+**/.venv*/
+**/__pycache__/
+**/.pytest_cache/
+**/output/
+**/analysis/
+**/js_reverse_cache/
+**/secrets/*
+!**/secrets/.gitkeep
+**/.env
+*.log

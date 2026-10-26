@@ -1,0 +1,62 @@
+# libtv 品牌营销周报
+
+主推品为 **libtv**，竞品为 **即梦、updream**。默认报告窗口为 2026-10-19 至 2026-10-25（北京时间）；修改 `weekly_config.json` 或在门户中设置其他连续七天。
+
+## 运行
+
+原采集工作台保持 `http://127.0.0.1:8000/`，品牌周报入口为 `http://127.0.0.1:8000/brand-report/`，原静态演示保存在 `demo.html`。普通小红书 Cookie 登录和蒲公英登录是两个会话，本功能使用前者。
+
+在小红书平台目录运行：
+
+```powershell
+py -3 -m venv .venv-weekly
+.\.venv-weekly\Scripts\python.exe -m pip install -r requirements-weekly.txt
+.\.venv-weekly\Scripts\python.exe main.py
+```
+
+已有兼容 PyTorch 的本地环境可用 `--system-site-packages` 复用大型依赖。本次环境使用独立 `.venv-weekly` 安装模型组件，并复用了本机 CPU PyTorch；首次编码需下载指定 MiniLM 权重，完整缓存可直接复用。
+
+门户点击“启动真实采集”，或在 PyCharm 中右键运行 `weekly.py`。无参数启动配置文件中的新任务；程序输出任务 ID，采集在独立后台进程继续。续采和分析也可手动运行：
+
+```powershell
+py -3 weekly.py collect --job REPORT_ID
+.\.venv-weekly\Scripts\python.exe weekly.py analyze --job REPORT_ID
+.\.venv-weekly\Scripts\python.exe weekly.py train --job REPORT_ID
+```
+
+## 采集口径
+
+- 每个关键词默认目标为 100 个非空搜索结果页，页面与 API 均校验最低值 100。
+- 当前平台最新发布搜索实测在第 51 页返回 `has_more=false`，前 50 页有结果。采集器按最新发布、综合、最多点赞的顺序补足目标，分别保留每种排序的页数，笔记按 ID 合并。跨排序有效页是抽样请求量，不能等同 100 页互不重复的笔记。
+- 不设置原综合采集的 50 篇笔记上限。逐篇取得详情，主评论和每个根评论下的子评论持续按游标翻页，无固定评论页数限制。
+- 每页落盘，异常、重复游标、重复页面、登录失效均记录状态。游标停滞时保留未完成标记；暂停后可续采。
+- SQLite 中保存搜索 ID、原始观测令牌及归一化数据，因此只存于被 Git 忽略的 `output/weekly/<REPORT_ID>/`。不上传 Cookie、原始采集数据、运行数据库或模型权重。
+
+## BERTopic
+
+固定编码器：`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`。处理链为多语言 MiniLM 语义向量、UMAP 降维、HDBSCAN 聚类、c-TF-IDF 话题词提取，采用固定随机种子。少于 20 条有效去重文本时明确返回样本不足，不替换为随机话题。
+
+模型可在跨期已采集语料上训练，周报话题只计入目标日期内的文本；跨期训练话题另列。保存 `bertopic-topics.csv`、`topic-assignments.json` 和向量数组，便于核查样本归属。话题编号只在同一次训练中有效，重训后的编号不能直接当作历史话题增长。
+
+## LinearSVC 情感分类
+
+采用字符 1—3 gram TF-IDF 和 `LinearSVC(C=1.0, class_weight="balanced")`，分类为正向、中性、负向。字符特征对中文短评论及混合英文产品名较直接，不依赖运行时分词。
+
+真实评论在门户逐条标注，或编辑任务目录的 `sentiment-labels.csv`。至少需要 45 条有效去重评论、每类 8 条，并且不同笔记组中应同时具有类别覆盖。训练/测试按 `note_id` 分组隔离，完全重复文本先去重，TF-IDF 只在训练部分拟合；评估后为生产预测重新拟合全部已标注样本。
+
+结果保存 `sentiment-svm.joblib`、`sentiment-metrics.json` 和预测映射，指标包括分类报告、混淆矩阵和标签来源。`ai_assisted_review` 表示 AI 辅助标注，相关分数仅衡量相对这批标签的一致性；只有全部标签来自门户中的 `human_review` 时才标记为独立人工参考。首批辅助标注规模小，仍需人工补标并增加负向样本。
+
+## 数据边界
+
+品牌归因由观测到的标题、正文中的名称匹配产生，搜索来源只保留为来源信息。多品牌笔记可以计入多个品牌，不能把相加结果解释为去重市场总量。评论按所属讨论串归因，内容可能在评价生成作品而非工具产品本身，需下钻确认。
+
+周报按真实发布时间筛选，日期缺失保持缺失。互动量为采集时累计快照，非当周新增互动；缺少此前采集基线时增长率保持不可用。未训练情感模型、数据字段缺失、评论未采全等情况均在门户显示，不使用旧演示数字补齐。
+
+## 离线验证
+
+```powershell
+py -3 -m pytest tests -q
+node --check web/brand-report/live.js
+```
+
+新增用例覆盖跨排序 100 页、主评论与子评论全分页、断点去重、游标停滞、周次筛选、标注 CSV 保留和 API 参数边界。测试使用本地 fixture，不调用真实采集接口。

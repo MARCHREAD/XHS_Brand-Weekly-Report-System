@@ -1,0 +1,11 @@
+{
+  "primary": "libtv",
+  "competitors": ["即梦", "updream"],
+  "search_pages": 100,
+  "sort": "time_descending",
+  "week_start": "2026-10-19",
+  "week_end": "2026-10-25",
+  "timezone": "Asia/Shanghai",
+  "comment_policy": "all_available_main_and_replies",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+}
