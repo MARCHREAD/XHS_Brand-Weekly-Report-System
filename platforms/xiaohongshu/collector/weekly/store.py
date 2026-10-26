@@ -34,7 +34,13 @@ class Store:
 
     def put_many(self, records):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.executemany("INSERT OR REPLACE INTO records VALUES(?,?,?)", [(k, key, json.dumps(v, ensure_ascii=False)) for k, key, v in records])
+            if any(kind in {"note", "comment", "search"} for kind, _, _ in records):
+                previous = db.execute("SELECT data FROM records WHERE kind='meta' AND key='dataset'").fetchone()
+                value = json.loads(previous[0]) if previous else {"revision": 0}
+                value.update(revision=value["revision"] + 1, updated_at=now())
+                db.execute("INSERT OR REPLACE INTO records VALUES('meta','dataset',?)", (json.dumps(value),))
 
     def items(self, kind):
         with self.connect() as db:
@@ -46,10 +52,14 @@ class Store:
             return db.execute("SELECT COUNT(*) FROM records WHERE kind=?", (kind,)).fetchone()[0]
 
     def meta(self, **changes):
-        meta = self.get("meta", "job", {})
-        if changes:
+        if not changes:
+            return self.get("meta", "job", {})
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT data FROM records WHERE kind='meta' AND key='job'").fetchone()
+            meta = json.loads(row[0]) if row else {}
             meta.update(changes, updated_at=now())
-            self.put("meta", "job", meta)
+            db.execute("INSERT OR REPLACE INTO records VALUES('meta','job',?)", (json.dumps(meta, ensure_ascii=False),))
         return meta
 
     def summary(self):

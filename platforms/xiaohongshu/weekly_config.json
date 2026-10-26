@@ -2,6 +2,8 @@
   "primary": "libtv",
   "competitors": ["即梦", "updream"],
   "search_pages": 100,
+  "request_delay_seconds": 6.0,
+  "svm_semantic_features": true,
   "sort": "time_descending",
   "week_start": "2026-10-19",
   "week_end": "2026-10-25",

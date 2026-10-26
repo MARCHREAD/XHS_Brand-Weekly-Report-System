@@ -17,6 +17,8 @@ def error_kind(exc):
     if isinstance(exc, XhsUpstreamError):
         if exc.auth_failure:
             return "login_required"
+        if exc.upstream_code == 300013 or exc.upstream_status == 429:
+            return "rate_limited"
         if exc.upstream_status in {403, 429, 461, 471} or exc.upstream_code in {300012, -100, -101}:
             return "verification_required"
     return "upstream_error"

@@ -56,13 +56,9 @@ def corpus(store):
 
 
 def ensure_annotation_queue(store, docs):
-    existing = store.get("labels", "sentiment", {})
+    from .sentiment import merge_labels
+    existing = merge_labels(store)
     path = store.directory / "sentiment-labels.csv"
-    if path.exists():
-        with path.open(encoding="utf-8-sig", newline="") as f:
-            for row in csv.DictReader(f):
-                if row.get("label") in LABELS:
-                    existing[row["id"]] = {"label": row["label"], "source": row.get("source") or "csv_review"}
     rows = []
     seen = set()
     for doc in docs:
@@ -79,92 +75,13 @@ def ensure_annotation_queue(store, docs):
 
 
 def train_sentiment(store):
-    import joblib
-    import numpy as np
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics import classification_report, confusion_matrix
-    from sklearn.model_selection import GroupShuffleSplit
-    from sklearn.pipeline import Pipeline
-    from sklearn.svm import LinearSVC
-
-    _, docs = corpus(store)
-    by_id = {d["id"]: d for d in docs if d["kind"] == "comment"}
-    labels = store.get("labels", "sentiment", {})
-    path = store.directory / "sentiment-labels.csv"
-    if path.exists():
-        with path.open(encoding="utf-8-sig", newline="") as f:
-            for row in csv.DictReader(f):
-                if row.get("label") in LABELS:
-                    labels[row["id"]] = {"label": row["label"], "source": row.get("source") or "csv_review"}
-    rows, seen = [], set()
-    for key, annotation in labels.items():
-        doc = by_id.get(key)
-        if not doc or annotation.get("label") not in LABELS or doc["text"] in seen:
-            continue
-        seen.add(doc["text"])
-        rows.append({**doc, **annotation})
-    counts = Counter(r["label"] for r in rows)
-    if len(rows) < 45 or any(counts[c] < 8 for c in LABELS):
-        raise ValueError(f"Need at least 45 reviewed comments and 8 per class; observed {dict(counts)}")
-    texts = np.array([r["text"] for r in rows])
-    y = np.array([r["label"] for r in rows])
-    # Whole notes stay in one side of the split. Text duplicates were removed beforehand.
-    groups = np.array([r["note_id"] for r in rows])
-    train = test = None
-    for seed in range(42, 142):
-        a, b = next(GroupShuffleSplit(n_splits=1, test_size=.25, random_state=seed).split(texts, y, groups))
-        if (len(a) >= len(rows) * .6 and len(b) >= 6
-                and all(sum(y[a] == label) >= 5 and sum(y[b] == label) >= 2 for label in LABELS)):
-            train, test = a, b
-            break
-    if train is None:
-        raise ValueError("Need class coverage in distinct note groups for an honest holdout")
-    model = Pipeline([("tfidf", TfidfVectorizer(analyzer="char", ngram_range=(1, 3), min_df=1, max_features=40000, sublinear_tf=True)), ("svm", LinearSVC(C=1.0, class_weight="balanced", random_state=42))])
-    model.fit(texts[train], y[train])
-    predicted = model.predict(texts[test])
-    report = classification_report(y[test], predicted, labels=LABELS, output_dict=True, zero_division=0)
-    metrics = {"model": "TF-IDF character ngrams(1,3) + LinearSVC", "C": 1.0, "class_weight": "balanced", "train_count": len(train), "test_count": len(test), "classes": dict(counts), "label_sources": dict(Counter(r.get("source", "unknown") for r in rows)), "split": "grouped by note_id; identical texts deduplicated; TF-IDF fitted on training only; split constrained by class coverage and size, never by prediction scores", "classification_report": report, "confusion_matrix": confusion_matrix(y[test], predicted, labels=LABELS).tolist(), "label_order": LABELS, "test_ids": [rows[i]["id"] for i in test], "generated_at": now(), "independent_human_ground_truth": all(r.get("source") == "human_review" for r in rows), "experimental": True}
-    # Production model refits reviewed examples after keeping the independent evaluation above.
-    model.fit(texts, y)
-    joblib.dump(model, store.directory / "sentiment-svm.joblib")
-    atomic_json(store.directory / "sentiment-metrics.json", metrics)
-    store.put("labels", "sentiment", labels)
+    from .sentiment import train
+    return train(store, corpus(store)[1])
 
 
 def topics(store, docs):
-    """Use the declared BERTopic algorithm, never substitute a keyword count silently."""
-    import jieba
-    import numpy as np
-    from bertopic import BERTopic
-    from hdbscan import HDBSCAN
-    from sentence_transformers import SentenceTransformer
-    from sklearn.feature_extraction.text import CountVectorizer
-    from umap import UMAP
-
-    # Repeated solicitation/comments should not dominate topic fitting.
-    unique = list(dict.fromkeys(d["text"] for d in docs if len(d["text"]) >= 6))
-    if len(unique) < 20:
-        return {}, [], {"state": "insufficient_samples", "sample_size": len(unique)}
-    encoder_name = store.meta()["config"]["embedding_model"]
-    store.meta(analysis_stage="embeddings")
-    cached = Path.home() / ".cache/huggingface/hub" / ("models--" + encoder_name.replace("/", "--")) / "snapshots"
-    snapshots = sorted(cached.glob("*")) if cached.exists() else []
-    encoder = SentenceTransformer(str(snapshots[-1]) if snapshots else encoder_name, device="cpu")
-    embeddings = encoder.encode(unique, show_progress_bar=True, batch_size=32, normalize_embeddings=True)
-    store.meta(analysis_stage="bertopic")
-    model = BERTopic(embedding_model=encoder, umap_model=UMAP(n_neighbors=min(15, len(unique) - 1), n_components=min(5, len(unique) - 2), min_dist=0.0, metric="cosine", random_state=42), hdbscan_model=HDBSCAN(min_cluster_size=max(3, min(15, len(unique) // 15)), min_samples=2, metric="euclidean", prediction_data=True), vectorizer_model=CountVectorizer(tokenizer=jieba.lcut, token_pattern=None, stop_words=STOP_WORDS), calculate_probabilities=False, verbose=True)
-    assigned, _ = model.fit_transform(unique, embeddings)
-    lookup = dict(zip(unique, map(int, assigned)))
-    info = []
-    for topic_id in sorted(set(assigned)):
-        if topic_id == -1:
-            continue
-        words = model.get_topic(topic_id) or []
-        info.append({"id": int(topic_id), "keywords": [w for w, _ in words[:8]], "training_count": int(sum(t == topic_id for t in assigned))})
-    model.get_topic_info().to_csv(store.directory / "bertopic-topics.csv", index=False, encoding="utf-8-sig")
-    np.save(store.directory / "topic-embeddings.npy", embeddings)
-    atomic_json(store.directory / "topic-assignments.json", lookup)
-    return lookup, info, {"state": "trained", "algorithm": "BERTopic: MiniLM + UMAP + HDBSCAN + c-TF-IDF", "embedding_model": encoder_name, "fit_sample_size": len(unique), "topic_count": len(info), "noise_count": sum(t == -1 for t in assigned), "fit_scope": "all collected history; weekly counts filtered separately"}
+    from .topics import train_topics
+    return train_topics(store, docs)
 
 
 def build_report(store, notes, docs, lookup=None, topic_info=None, topic_model=None, sentiment=None, metrics=None):
@@ -185,7 +102,8 @@ def build_report(store, notes, docs, lookup=None, topic_info=None, topic_model=N
             if all(isinstance(x, int) for x in counts):
                 interactions += sum(counts)
                 complete_counts += 1
-        by_brand.append({"brand": brand, "volume": len(subset), "interactions": interactions if complete_counts else None, "complete_metric_notes": complete_counts, "collected_history_notes": sum(brand in n["brands"] for n in notes.values()), "sentiment": {label: dist[label] for label in LABELS}, "positive_rate": dist["positive"] / sum(dist.values()) if dist else None, "weekly_comment_texts": len(text_subset)})
+        valid = sum(dist[label] for label in LABELS)
+        by_brand.append({"brand": brand, "volume": len(subset), "interactions": interactions if complete_counts else None, "complete_metric_notes": complete_counts, "collected_history_notes": sum(brand in n["brands"] for n in notes.values()), "sentiment": {label: dist[label] for label in LABELS}, "positive_rate": dist["positive"] / valid if valid else None, "pending_texts": dist["pending"], "weekly_comment_texts": len(text_subset)})
     topic_results = []
     for topic in topic_info:
         selected = [d for d in current_docs if lookup.get(d["text"]) == topic["id"]]
@@ -203,6 +121,7 @@ def build_report(store, notes, docs, lookup=None, topic_info=None, topic_model=N
 
 def analyze(store, run_topics=True):
     store.meta(analysis_status="running", analysis_error=None, analysis_stage="preparing")
+    input_revision = store.get("meta", "dataset", {}).get("revision", 0)
     notes, docs = corpus(store)
     ensure_annotation_queue(store, docs)
     lookup, info, topic_model = {}, [], {"state": "not_trained"}
@@ -215,10 +134,28 @@ def analyze(store, run_topics=True):
         model = joblib.load(model_path)
         comments = [d for d in docs if d["kind"] == "comment"]
         if comments:
-            predictions = model.predict([d["text"] for d in comments])
-            sentiment = {d["id"]: str(label) for d, label in zip(comments, predictions)}
+            import numpy as np
+            texts = [d["text"] for d in comments]
+            predictions = model.predict(texts)
+            scores = np.sort(model.decision_function(texts), axis=1)
+            margins = scores[:, -1] - scores[:, -2]
+            sentiment = {d["id"]: str(label) if margin >= .2 else "pending" for d, label, margin in zip(comments, predictions, margins)}
         metrics = json.loads((store.directory / "sentiment-metrics.json").read_text(encoding="utf-8"))
     report = build_report(store, notes, docs, lookup, info, topic_model, sentiment, metrics)
+    report["data_revision"] = input_revision
+    from .dashboard import project
+    report["dashboard"] = project(report, notes, docs, lookup, info, sentiment)
+    report["_analysis"] = {"lookup": lookup, "topics": info, "predictions": sentiment}
+    atomic_json(store.directory / "topic-info.json", info)
+    history = store.directory / "report-history"
+    history.mkdir(exist_ok=True)
+    old_path = store.directory / "report.json"
+    if old_path.exists():
+        old = json.loads(old_path.read_text(encoding="utf-8"))
+        stamp = old["generated_at"].replace(":", "").replace(".", "")
+        atomic_json(history / f"{stamp}.json", old)
+    stamp = report["generated_at"].replace(":", "").replace(".", "")
+    atomic_json(history / f"{stamp}.json", report)
     atomic_json(store.directory / "report.json", report)
     atomic_json(store.directory / "sentiment-predictions.json", sentiment)
     store.meta(analysis_status="completed", analysis_stage="finished", analysis_finished_at=now(), annotation_rows=len([d for d in docs if d["kind"] == "comment"]))

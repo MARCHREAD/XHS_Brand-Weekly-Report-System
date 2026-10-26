@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import date
 import json
 from typing import Literal
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 from .manager import Manager, default_config
 from .analysis import LABELS, build_report, corpus
+from .dashboard import load_dashboard
 
 
 class ReportRequest(BaseModel):
@@ -82,16 +84,54 @@ def router(manager: Manager, get_service, require_local):
             raise HTTPException(409, str(exc)) from exc
 
     @r.get("/jobs/{job_id}/report")
-    def report(job_id: str):
+    def report(job_id: str, scope: Literal["week", "history"] = "week", brand: str | None = None, week_start: date | None = None, snapshot: str | None = None):
         s = store(job_id)
-        path = s.directory / "report.json"
+        if snapshot and not re.fullmatch(r"[0-9T+\-]+", snapshot):
+            raise HTTPException(422, "Invalid snapshot id")
+        path = s.directory / "report-history" / f"{snapshot}.json" if snapshot else s.directory / "report.json"
         if path.exists():
             value = json.loads(path.read_text(encoding="utf-8"))
-            value["collection"] = s.summary()
-            value["stale"] = s.meta().get("updated_at", "") > value["generated_at"]
+            if not snapshot:
+                value["collection"] = s.summary()
+                try:
+                    value["dashboard"] = load_dashboard(s, value, scope=scope, brand=brand, week_start=week_start.isoformat() if week_start else None)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
+                dataset = s.get("meta", "dataset", {})
+                value["stale"] = dataset.get("revision", 0) != value.get("data_revision", -1)
+            else:
+                value["snapshot"] = snapshot
+            value.pop("_analysis", None)
             return value
+        if snapshot:
+            raise HTTPException(404, "Snapshot not found")
         notes, docs = corpus(s)
-        return build_report(s, notes, docs)
+        value = build_report(s, notes, docs)
+        try:
+            value["dashboard"] = load_dashboard(s, value, scope=scope, brand=brand, week_start=week_start.isoformat() if week_start else None)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return value
+
+    @r.get("/jobs/{job_id}/snapshots")
+    def snapshots(job_id: str):
+        s = store(job_id)
+        result = []
+        for path in sorted((s.directory / "report-history").glob("*.json"), reverse=True):
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if "dashboard" not in value:
+                continue
+            result.append({"id": path.stem, "generated_at": value["generated_at"], "primary": value["config"]["primary"], "period": [value["config"]["week_start"], value["config"]["week_end"]], "topic_sample_size": value["models"]["topic"].get("fit_sample_size", 0), "labeled_count": (value["models"]["sentiment"].get("metrics") or {}).get("labeled_total", 0)})
+        return result
+
+    @r.get("/jobs/{job_id}/training-history")
+    def training_history(job_id: str):
+        s = store(job_id)
+        result = []
+        for path in sorted((s.directory / "training-history").glob("svm-metrics-*.json")):
+            metrics = json.loads(path.read_text(encoding="utf-8"))
+            result.append({k: metrics.get(k) for k in ["generated_at", "train_count", "test_count", "classes", "classification_report", "label_sources", "previous_evaluation"]})
+        return result
 
     @r.get("/jobs/{job_id}/evidence")
     def evidence(job_id: str, offset: int = 0):

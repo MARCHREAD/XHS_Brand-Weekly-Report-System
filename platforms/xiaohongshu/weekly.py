@@ -25,7 +25,8 @@ def main():
     store = manager.store(args.job)
     if args.action == "collect":
         from collector.service import CollectorService
-        settings = replace(settings, worker_count=1, cache_enabled=False, min_delay_seconds=max(1.5, settings.min_delay_seconds))
+        delay = max(float(store.meta()["config"].get("request_delay_seconds", 6.0)), settings.min_delay_seconds)
+        settings = replace(settings, worker_count=1, cache_enabled=False, min_delay_seconds=delay)
         if not settings.cookie_configured():
             store.meta(status="login_required", error="Open the workbench Cookie login")
             return
