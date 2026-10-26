@@ -35,6 +35,8 @@ py -3.13 -m venv .venv
 
 大评论量笔记可保留断点延后补采，仍计入未完成；遇到平台限流时，默认保留断点并暂停，处理后继续原任务。
 
+模型离线复核：在本平台目录运行 `.\.venv-weekly\Scripts\python.exe scripts\verify_weekly_models.py --job REPORT_ID`，可复算固定测试集并检查已保存的 BERTopic 和 SVM 模型；此命令不启动采集或重新训练。[算法原理、实测效果与开发截图](../../docs/algorithm-implementation.md)。
+
 如果浏览器提示无法访问，请先在本目录启动服务：
 
 ```powershell
