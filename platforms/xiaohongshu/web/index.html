@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#ff2442">
+  <title>XHS Collector</title>
+  <link rel="stylesheet" href="/styles.css?v=0.7.7-pgy-phone-2">
+  <script src="/app.js?v=0.7.7-pgy-phone-2" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到工作区</a>
+
+  <header class="topbar">
+    <div class="brand" aria-label="XHS Collector">
+      <div class="brand-mark" aria-hidden="true">R</div>
+      <div>
+        <h1>XHS Collector</h1>
+        <p>本地数据工作台 <span>v0.7.7</span></p>
+      </div>
+    </div>
+
+    <div class="service-status" aria-label="服务状态">
+      <span class="status-chip is-pending" id="api-status"><i></i>API 检查中</span>
+      <button class="status-chip status-action is-pending" id="cookie-status" type="button" aria-haspopup="dialog" title="配置或刷新小红书会话"><i></i>Cookie</button>
+      <button class="status-chip status-action is-pending" id="pgy-status" type="button" aria-haspopup="dialog" title="登录或验证蒲公英会话"><i></i>蒲公英</button>
+      <span class="status-chip is-pending" id="worker-status"><i></i>Worker</span>
+      <span class="status-chip is-pending" id="gpt-status"><i></i>GPT</span>
+      <a class="icon-button" href="/docs" title="打开 Swagger" aria-label="打开 Swagger">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+      </a>
+      <a class="report-entry-link" href="/brand-report/" title="打开品牌营销周报门户">品牌周报门户</a>
+    </div>
+  </header>
+
+  <nav class="mode-tabs" aria-label="工作模式">
+    <button class="mode-tab is-active" type="button" data-mode="collector" aria-selected="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      关键词采集
+    </button>
+    <button class="mode-tab" type="button" data-mode="endpoint" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14"/></svg>
+      接口调试
+    </button>
+    <button class="mode-tab" type="button" data-mode="pgy" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5.6 6.6l12.8 10.8M18.4 6.6 5.6 17.4"/><circle cx="12" cy="12" r="3"/></svg>
+      蒲公英接口
+    </button>
+  </nav>
+
+  <main class="workspace" id="workspace">
+    <aside class="control-panel" aria-label="请求参数">
+      <form id="collector-form" class="panel-form">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">COLLECT</span>
+            <h2>关键词采集</h2>
+          </div>
+          <span class="request-estimate" id="request-estimate">约 16 次请求</span>
+        </div>
+
+        <label class="field field-primary">
+          <span>关键词</span>
+          <div class="input-with-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input name="keyword" type="search" value="咖啡" maxlength="100" required autocomplete="off">
+          </div>
+        </label>
+
+        <div class="field-grid">
+          <label class="field">
+            <span>搜索页数</span>
+            <input name="pages" type="number" min="1" max="5" value="1" inputmode="numeric">
+          </label>
+          <label class="field">
+            <span>笔记上限</span>
+            <input name="note_limit" type="number" min="1" max="50" value="5" inputmode="numeric">
+          </label>
+        </div>
+
+        <div class="field-grid">
+          <label class="field">
+            <span>排序</span>
+            <select name="sort">
+              <option value="general">综合</option>
+              <option value="popularity_descending">最多点赞</option>
+              <option value="time_descending">最新发布</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>笔记类型</span>
+            <select name="note_type">
+              <option value="0">全部</option>
+              <option value="1">视频</option>
+              <option value="2">图文</option>
+            </select>
+          </label>
+        </div>
+
+        <fieldset class="option-group">
+          <legend>关联数据</legend>
+          <label class="check-row">
+            <input name="include_details" type="checkbox" checked>
+            <span class="check-box" aria-hidden="true"></span>
+            <span><b>笔记详情</b><small>简介、Tag、收藏与分享</small></span>
+          </label>
+          <label class="check-row">
+            <input name="include_authors" type="checkbox" checked>
+            <span class="check-box" aria-hidden="true"></span>
+            <span><b>作者资料</b><small>昵称、简介与互动指标</small></span>
+          </label>
+          <label class="check-row">
+            <input name="include_comments" type="checkbox" checked>
+            <span class="check-box" aria-hidden="true"></span>
+            <span><b>评论</b><small>主评论与当前内嵌回复</small></span>
+          </label>
+        </fieldset>
+
+        <label class="field" id="comment-pages-field">
+          <span>每篇评论页数</span>
+          <input name="comment_pages" type="number" min="1" max="5" value="1" inputmode="numeric">
+        </label>
+
+        <div class="toggle-stack">
+          <label class="toggle-row" id="gpt-toggle-row">
+            <span><b>GPT 补全</b><small>摘要、主题和关键词</small></span>
+            <input name="use_gpt" type="checkbox" role="switch">
+            <span class="toggle" aria-hidden="true"></span>
+          </label>
+          <label class="toggle-row">
+            <span><b>保存 JSONL</b><small>输出到项目 output 目录</small></span>
+            <input name="save" type="checkbox" role="switch">
+            <span class="toggle" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <button class="primary-button" type="submit" id="collect-button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="17" r="3"/><path d="m20.2 19.2 1.8 1.8"/></svg>
+          <span>开始采集</span>
+        </button>
+        <p class="field-error" id="collector-error" role="alert"></p>
+      </form>
+
+      <form id="endpoint-form" class="panel-form is-hidden">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">REQUEST</span>
+            <h2>接口调试</h2>
+          </div>
+          <span class="method-badge" id="method-badge">GET</span>
+        </div>
+
+        <label class="field">
+          <span>接口</span>
+          <select name="endpoint" id="endpoint-select">
+              <option value="search">搜索笔记</option>
+              <option value="userSearch">搜索用户</option>
+            <option value="homefeed">首页推荐</option>
+            <option value="note">笔记详情</option>
+            <option value="comments">笔记评论</option>
+            <option value="author">作者资料</option>
+            <option value="authorNotes">作者笔记</option>
+          </select>
+        </label>
+
+        <div id="endpoint-fields"></div>
+
+        <button class="primary-button" type="submit" id="endpoint-button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <span>发送请求</span>
+        </button>
+        <p class="field-error" id="endpoint-error" role="alert"></p>
+      </form>
+
+      <form id="pgy-endpoint-form" class="panel-form is-hidden">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">PGY REQUEST</span>
+            <h2>蒲公英接口调试</h2>
+          </div>
+          <span class="method-badge" id="pgy-method-badge">POST</span>
+        </div>
+
+        <label class="field">
+          <span>接口</span>
+          <select name="endpoint" id="pgy-endpoint-select">
+            <option value="noteDetail">蒲公英笔记详情</option>
+            <option value="bloggerDetail">博主完整详情</option>
+            <option value="similar">相似博主推荐</option>
+            <option value="square">笔记博主广场</option>
+            <option value="filterOptions">博主筛选字典</option>
+          </select>
+        </label>
+
+        <div id="pgy-endpoint-fields"></div>
+
+        <button class="primary-button" type="submit" id="pgy-endpoint-button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <span>发送蒲公英请求</span>
+        </button>
+        <p class="field-error" id="pgy-endpoint-error" role="alert"></p>
+      </form>
+    </aside>
+
+    <section class="result-panel" aria-live="polite">
+      <header class="result-toolbar">
+        <div>
+          <span class="eyebrow">RESPONSE</span>
+          <h2 id="result-title">等待请求</h2>
+        </div>
+        <div class="result-actions">
+          <div class="response-meta" id="response-meta"></div>
+          <div class="view-switch" role="group" aria-label="结果视图">
+            <button type="button" class="is-active" data-view="cards">卡片</button>
+            <button type="button" data-view="trace">调用 <span id="trace-count">0</span></button>
+            <button type="button" data-view="json">JSON</button>
+          </div>
+          <button class="icon-button" type="button" id="copy-json" title="复制 JSON" aria-label="复制 JSON" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="icon-button" type="button" id="export-csv" title="导出 CSV" aria-label="导出 CSV" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="job-progress is-hidden" id="job-progress" aria-live="polite">
+        <div class="progress-copy">
+          <span class="progress-state" id="progress-state">任务排队中</span>
+          <strong id="progress-count">0 / 0</strong>
+          <span id="pool-state">Worker 0 · 排队 0</span>
+        </div>
+        <div class="progress-track" role="progressbar" aria-label="采集进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <span id="progress-bar"></span>
+        </div>
+      </section>
+
+      <div class="result-body" id="result-body">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-visual" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <h3>准备就绪</h3>
+          <p>选择参数后发送请求</p>
+        </div>
+        <div class="loading-grid is-hidden" id="loading-grid" aria-label="正在加载">
+          <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+        </div>
+        <div class="note-grid is-hidden" id="note-grid"></div>
+        <div class="trace-view is-hidden" id="trace-view"></div>
+        <div class="generic-result is-hidden" id="generic-result"></div>
+        <pre class="json-view is-hidden" id="json-view" tabindex="0"></pre>
+      </div>
+    </section>
+  </main>
+
+  <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+  <aside class="detail-drawer" id="detail-drawer" aria-hidden="true" aria-labelledby="drawer-title">
+    <header>
+      <div>
+        <span class="eyebrow" id="drawer-eyebrow">NOTE DETAIL</span>
+        <h2 id="drawer-title">笔记详情</h2>
+      </div>
+      <button class="icon-button" type="button" id="close-drawer" title="关闭" aria-label="关闭详情">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </header>
+    <div class="drawer-content" id="drawer-content"></div>
+  </aside>
+
+  <dialog class="session-dialog" id="session-dialog" aria-labelledby="session-dialog-title">
+    <div class="session-dialog-shell">
+      <header class="session-dialog-header">
+        <div>
+          <span class="eyebrow">XHS SESSION</span>
+          <h2 id="session-dialog-title">采集会话管理</h2>
+        </div>
+        <button class="icon-button session-dialog-close" type="button" id="close-session-dialog" aria-label="关闭会话管理">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="session-dialog-body">
+        <section class="session-overview" aria-label="会话健康状态">
+          <div>
+            <span class="session-health-dot is-pending" id="session-health-dot" aria-hidden="true"></span>
+            <div class="session-health-copy">
+              <strong id="session-health-title">读取会话状态…</strong>
+              <small id="session-health-meta">正在检查本地 Cookie 配置</small>
+            </div>
+          </div>
+          <button class="secondary-button" type="button" id="verify-session">立即验证</button>
+        </section>
+        <div class="session-divider"><span>登录失效时重新建立</span></div>
+        <div class="qr-frame" id="qr-frame" aria-busy="false">
+          <img id="login-qr" alt="使用小红书 App 扫描的登录二维码" width="240" height="240" hidden>
+          <div class="qr-placeholder" id="qr-placeholder" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+        <p class="session-state" id="session-state" role="status" aria-live="polite">有效会话会由后台定期验证和续期</p>
+        <p class="session-countdown" id="session-countdown"></p>
+        <form class="sms-verification-form" id="sms-verification-form" hidden>
+          <label for="sms-verification-code">短信验证码已发送至 <strong id="sms-receiver">账号绑定手机</strong></label>
+          <div class="sms-code-row">
+            <input id="sms-verification-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 位验证码" required>
+            <button class="primary-button" type="submit" id="submit-sms-code">验证并继续</button>
+          </div>
+          <button class="secondary-button sms-resend-button" type="button" id="resend-sms-code">重新发送</button>
+          <p class="form-error" id="sms-verification-error" role="alert"></p>
+        </form>
+        <a class="secondary-button session-verification-link" id="official-verification-link" target="_blank" rel="noreferrer" hidden>打开小红书官方验证</a>
+        <button class="primary-button session-login-button" type="button" id="start-qr-login">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM16 14v2M14 18h2v2M20 14v6h-2"/></svg>
+          <span>生成新的登录二维码</span>
+        </button>
+        <p class="session-help">后台会复用同一 Python Session，并将上游轮换的新 Cookie 原子写入 <code>secrets/</code>。只有服务端确认会话失效时才需要重新验证。</p>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="session-dialog pgy-dialog" id="pgy-dialog" aria-labelledby="pgy-dialog-title">
+    <div class="session-dialog-shell pgy-dialog-shell">
+      <header class="session-dialog-header">
+        <div>
+          <span class="eyebrow">PGY SESSION</span>
+          <h2 id="pgy-dialog-title">蒲公英会话管理</h2>
+        </div>
+        <button class="icon-button session-dialog-close" type="button" id="close-pgy-dialog" aria-label="关闭蒲公英会话管理">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </header>
+      <div class="session-dialog-body pgy-dialog-body">
+        <section class="session-overview" aria-label="蒲公英会话健康状态">
+          <div>
+            <span class="session-health-dot is-pending" id="pgy-health-dot" aria-hidden="true"></span>
+            <div class="session-health-copy">
+              <strong id="pgy-health-title">读取蒲公英会话…</strong>
+              <small id="pgy-health-meta">正在检查本地登录状态</small>
+            </div>
+          </div>
+          <button class="secondary-button" type="button" id="verify-pgy-session">立即验证</button>
+        </section>
+        <div class="session-divider"><span>选择登录方式</span></div>
+        <div class="view-switch pgy-login-switch" role="group" aria-label="蒲公英登录方式">
+          <button type="button" data-pgy-login="email" class="is-active" aria-pressed="true">邮箱密码</button>
+          <button type="button" data-pgy-login="phone" aria-pressed="false">手机号验证码</button>
+        </div>
+        <form class="pgy-login-form" id="pgy-login-form">
+          <label class="field">
+            <span>邮箱</span>
+            <input id="pgy-email" name="email" type="email" autocomplete="username" maxlength="254" required placeholder="name@example.com">
+          </label>
+          <label class="field">
+            <span>密码</span>
+            <input id="pgy-password" name="password" type="password" autocomplete="current-password" maxlength="256" required placeholder="蒲公英账号密码">
+          </label>
+          <label class="check-row pgy-policy-row">
+            <input id="pgy-policy" type="checkbox" required>
+            <span class="check-box" aria-hidden="true"></span>
+            <span><b>同意蒲公英用户隐私政策</b><small><a href="https://agree.xiaohongshu.com/h5/terms/ZXXY20260624002/-1" target="_blank" rel="noreferrer">查看官方政策</a></small></span>
+          </label>
+          <button class="primary-button" type="submit" id="pgy-login-button">
+            <span>登录并保存会话</span>
+          </button>
+          <p class="form-error pgy-login-error" id="pgy-login-error" role="alert"></p>
+        </form>
+        <form class="pgy-login-form" id="pgy-phone-form" hidden>
+          <label class="field">
+            <span>手机号（+86）</span>
+            <input id="pgy-phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel-national" pattern="1[3-9][0-9]{9}" maxlength="11" required placeholder="中国大陆手机号">
+          </label>
+          <label class="check-row pgy-policy-row">
+            <input id="pgy-phone-policy" type="checkbox" required>
+            <span class="check-box" aria-hidden="true"></span>
+            <span><b>同意蒲公英用户隐私政策</b><small><a href="https://agree.xiaohongshu.com/h5/terms/ZXXY20260624002/-1" target="_blank" rel="noreferrer">查看官方政策</a></small></span>
+          </label>
+          <button class="secondary-button" type="button" id="pgy-send-code">发送验证码</button>
+          <label class="field">
+            <span>短信验证码</span>
+            <input id="pgy-phone-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required placeholder="6 位验证码">
+          </label>
+          <button class="primary-button" type="submit" id="pgy-phone-login-button" disabled><span>登录并保存会话</span></button>
+          <p class="form-error pgy-login-error" id="pgy-phone-error" role="alert"></p>
+          <p class="session-help" id="pgy-phone-hint" role="status" aria-live="polite">验证码由蒲公英官方发送，收到后输入登录。</p>
+        </form>
+        <p class="session-state" id="pgy-session-state" role="status" aria-live="polite">登录后由纯 Python Session 调用蒲公英接口</p>
+        <p class="session-help">邮箱、密码、手机号和验证码仅用于本次登录。成功后会话自动保存，重启可复用。</p>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

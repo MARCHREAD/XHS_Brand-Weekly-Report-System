@@ -1,0 +1,22 @@
+.venv/
+.venv-weekly/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+*.log
+secrets/*
+!secrets/.gitkeep
+output/*
+!output/.gitkeep
+js_reverse_cache/
+analysis/
+.cloudflare-tunnel/
+
+# Local reverse-engineering and scratch fixtures, some of which may contain
+# captured request headers or session values.
+/ENV1.js
+/index.html
+/note.md
+/test.py
+/xhs_test.js

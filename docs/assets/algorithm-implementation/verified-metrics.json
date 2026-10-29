@@ -1,0 +1,96 @@
+{
+  "verified_at": "2026-10-26T13:24:00.688162+00:00",
+  "collection": {
+    "status": "paused",
+    "notes": 3850,
+    "comments": 7800,
+    "notes_complete": 301,
+    "notes_incomplete": 3549
+  },
+  "collection_scope": "first two main comment pages and inline replies; earlier data retained",
+  "sentiment": {
+    "generated_at": "2026-10-26T13:17:00.247262+00:00",
+    "features": "character TF-IDF + fixed MiniLM semantic vectors",
+    "train_count": 205,
+    "test_count": 29,
+    "labeled_total": 253,
+    "reserved_unscored_count": 19,
+    "label_sources": {
+      "human_review": 86,
+      "ai_assisted_review": 167
+    },
+    "test_label_sources": {
+      "ai_assisted_review": 29
+    },
+    "best_params": {
+      "features__tfidf__ngram_range": [
+        2,
+        4
+      ],
+      "svm__C": 1.0
+    },
+    "cv_macro_f1": 0.5254087367068125,
+    "class_weight": "balanced",
+    "encoder_finetuned": false,
+    "independent_human_ground_truth": false
+  },
+  "topic": {
+    "generated_at": "2026-10-26T13:17:24.231195+00:00",
+    "algorithm": "BERTopic: MiniLM + UMAP + HDBSCAN + c-TF-IDF",
+    "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "input_texts": 1737,
+    "fit_sample_size": 1058,
+    "topic_count": 6,
+    "noise_count": 99,
+    "versions": {
+      "bertopic": "0.17.4",
+      "sentence-transformers": "5.7.0",
+      "umap-learn": "0.5.12",
+      "hdbscan": "0.8.44",
+      "scikit-learn": "1.7.2"
+    }
+  },
+  "topic_sizes": {
+    "-1": 99,
+    "0": 659,
+    "1": 100,
+    "2": 71,
+    "3": 48,
+    "4": 48,
+    "5": 33
+  },
+  "evaluation": {
+    "accuracy": 0.896551724137931,
+    "macro_f1": 0.6050260787102892,
+    "per_class_recall": {
+      "negative": 0.0,
+      "neutral": 1.0,
+      "positive": 0.9473684210526315
+    },
+    "confusion_matrix": [
+      [
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        8,
+        0
+      ],
+      [
+        0,
+        1,
+        18
+      ]
+    ],
+    "label_order": [
+      "negative",
+      "neutral",
+      "positive"
+    ],
+    "reproduced": true,
+    "svm_production_reload": true,
+    "bertopic_reload": true
+  }
+}
