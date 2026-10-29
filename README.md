@@ -32,3 +32,5 @@ BERTopic 完整管线可保存和加载；SVM 固定测试评论及其笔记组�
 [BERTopic 与 LinearSVC 原理和实测结果](docs/algorithm-implementation.md) · [七页 Word 材料](docs/李昊阅_202409010201_智能算法原理与实现.docx) · [高清开发截图](docs/智能算法开发环境截图.zip)
 
 材料包含具体参数、真实数据范围、固定测试指标、混淆矩阵和本机 VS Code 截图。新增离线复核脚本可实际加载保存模型并复算固定测试集。
+
+[系统部分实践与开发截图 Word](docs/李昊阅_202409010201_系统部分实践与开发截图.docx)：主要数据可视化、BERTopic 与 LinearSVC 实现，以及真实开发环境截图。
