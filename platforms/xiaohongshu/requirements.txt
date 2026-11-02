@@ -1,0 +1,7 @@
+curl_cffi>=0.16,<1
+cryptography>=46,<47
+fastapi>=0.141,<1
+openai>=3.13,<4
+qrcode[pil]>=8.2,<9
+uvicorn[standard]>=0.52,<1
+pycryptodome>=3.23,<4
